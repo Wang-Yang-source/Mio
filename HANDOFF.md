@@ -1,16 +1,19 @@
-# Hermes 交接：Pi Rust 内核
+# Hermes 交接：Mio 内存优化与三阶段架构路线
 
-## 用户要求
+## 用户要求与最新路线决策（2026-10-21 更新）
 
-在当前 Pi fork 上降低内存、迁移完整 Rust 内核，同时兼容原来的 Pi 插件。
-用户已选定兼容优先、保留 Node；Node-API 同进程连接 Rust，不改写现有插件。
-用户再次明确：已有 Rust 项目仅供参考，本项目必须无缝加载并运行 Pi 插件。插件代码、npm 依赖和配置原样使用，原版支持的原生 addon 也须保留；不得接受插件能力缩水。硬约束见 [AGENT.md](AGENT.md)。
-步骤与验收条件见 [TODO.md](TODO.md)。用户要求本地 Codex 停止开发，由 wayamac 上的 Hermes 接手。
+在当前 Pi fork 上降低单实例与多并发 Agent 内存占用，同时**100% 无缝兼容未修改的原版 Pi 插件**（硬约束见 [AGENT.md](AGENT.md)）。
+
+在完成阶段 0 实测评估（见 [STAGE0_FEASIBILITY_REPORT.md](STAGE0_FEASIBILITY_REPORT.md)）后，用户已正式作出路线决策并更新需求（详见 [PRD.md](PRD.md) 与 [TODO.md](TODO.md)）：
+1. **停止将 `agent-loop` 或完整 Agent 状态机重写为 Rust**；现有 `native/` 下的 Rust 骨架与 `packages/agent/src/loop-driver.ts` 原样保留为历史与阶段 3 可复用候选，不擅自删除。
+2. **阶段 1（当前实施）**：TypeScript 启动模块图瘦身与 `scripts/check-entry-graphs.mjs` 门禁补齐；对 `theme.ts`/TypeBox 校验、`cli-highlight`、`export-html`/`marked`、非交互路径 `InteractiveMode` 实施按需懒加载，保持公开同步/异步 API 契约与插件兼容。
+3. **阶段 2（仅规划，阶段 1 完成后推进）**：单 Node 宿主多会话池（Multi-Agent Daemon / Multiplexer）与轻量 CLI/TUI 客户端，目标支持 32+（扩展验证 64）并发会话；严格区分共享只读层与每会话隔离层，对存在进程级全局副作用或不可重入原生 addon 的插件提供独立子进程回退并如实计入内存口径。
+4. **阶段 3（仅规划）**：`native/` Rust N-API 有界共享线程池热点工具引擎，仅替换有实测证据的高并发热点（文件搜索 `grep`/`find`、大文件 I/O、Diff、输出截断等），保留 TS 回退且不重放副作用。
+5. **待验证目标声明**：单进程节省 `35–45 MB`、每会话增量约 `4.6 MB`、32/64 会话总占用 `< 300 MB` 均为待测目标/估算值，非既定实测保证。
 
 仓库：<https://github.com/Wang-Yang-source/Mio>
 
-交接分支：`codex/rust-kernel-handoff`。这是未完成的原型交接，不是可用的 Rust 后端。
-先读根目录 `AGENTS.md`、`AGENT.md`、`README.md` 和本文件；遵守项目检查及版本管理要求，不自动提交或发布后续功能。
+交接分支：`codex/rust-kernel-handoff`。先读根目录 `AGENTS.md`、`AGENT.md`、`PRD.md`、`TODO.md`、`README.md` 和本文件；遵守项目检查及版本管理要求，不自动提交或发布后续功能。
 
 ## 当前文件与实际行为
 
@@ -43,15 +46,16 @@ Rust 原型只保存调度状态，不保存消息正文，也不调用模型或
 
 通过检查使用的模型目录 revision：`sha256-ce2b35e558368354315ceab5a0bc1d50e53d405e8f261ea019a491591bb0a758`。可从 `https://pi.dev/api/models/revisions/<revision>?types=chat,image,classifier` 下载，核验散列后执行 `node packages/ai/scripts/hydrate-model-catalog.ts <下载文件>`。这些 JSON/类型数据是忽略文件；本次未改动 `nix/model-catalog.json` 或模型生成源码。
 
-## 接手顺序
+## 当前阶段与执行顺序
 
-用户随后提出“已有这些项目，Mio 是否还有必要做”。当前接手先完成阶段 0：测原版内存、定位热点、核实参考项目与插件兼容差异，交付带原始记录的可行性报告。完整迁移计划保留为后续候选路线；本阶段不直接重写内核，不把 Rust 本身当作节省内存的证据。
+阶段 0（原版内存基线、热点拆解与参考项目核查）已在 `t_32802225` 中完成，产出了 [STAGE0_FEASIBILITY_REPORT.md](STAGE0_FEASIBILITY_REPORT.md) 与原始基准记录 `/Users/waya/.hermes/cache/scratch/scenario-benchmark-results.json`。
 
-1. 拉取交接分支，确认文件和提交；将旧备份放在检查范围之外。
-2. 优先建立原版内存/行为基准；检查下列已有 Rust 项目，确认可借鉴点和兼容缺口。
-3. 审核当前原型。Agent/SDK 会共享和修改活跃消息对象，不能直接 JSON 往返整个上下文。
-4. 若继续当前架构，先完成显式可选的原生加载与调度闭环、失败释放、差分测试，保留 TypeScript 默认。
-5. 再按 TODO 顺序迁移。不要把编译通过、调度器单测或 README 声明当作完整兼容/省内存验收。
+当前按用户最新授权推进**阶段 1**（拆分为 4 个串行 Kanban 任务切片）：
+1. **切片 1/4（`t_3d6f4941`，已完成文档重构）**：创建 [PRD.md](PRD.md)，重构 [TODO.md](TODO.md)，同步 [AGENT.md](AGENT.md) 与本文件。阶段 1 代码与实测项保持未完成状态。
+2. **切片 2/4（`t_fcb99872`，替代归档卡 `t_ccda7a87`，已完成门禁与变更前基线）**：核查 CLI / Print / RPC / SDK 启动 eager 模块图，补齐 `scripts/check-entry-graphs.mjs` 门禁，修复 scratch 模块解析上下文并采集固定环境变更前 11 组探针×5 次有效基线（存于 `/Users/waya/.hermes/handoffs/mio-stage1-pre-baseline-20261021.json` 与 `/Users/waya/.hermes/handoffs/mio-entry-delivery-20261021.md`）。
+3. **切片 3/4（`t_2348d011`，替代归档卡 `t_8a8382ac`，已完成按需加载）**：`InteractiveMode` 与 `export-html`/`marked` 改为异步边界 `await import()`，`theme-schema.ts` 改为仅在交互或非内置主题时按需加载；`check-entry-graphs.mjs` 改为最终预算（cli 381 / rpc-entry 380 / rpc-mode 60 / sdk 309 / print 8）并完成注入回流探针。`utils/syntax-highlight.ts`（同步公开 API）与 `marked`（pi-tui 根 barrel）因打包安全保留 eager，原因见 `/Users/waya/.hermes/handoffs/mio-lazy-delivery-20261021.md`。
+4. **切片 4/4（`t_9c59244c`，替代归档卡 `t_51b9f553`，已完成阶段 1 验收）**：同环境 5 次实测（11 探针 + 1 工作负载探针）与逐项前后对比见 `/Users/waya/.hermes/handoffs/mio-stage1-post-baseline-20261021.json`。**RSS 实测仅降 −1.97 MB（125.87→123.90 MB），未达 35–45 MB 目标**：`typebox`/`highlight.js`/`marked` 仍 eager，被移除模块的成本仍由其他路径支付。功能验收：`npm run check` exit 0；vitest 22/23 文件通过（`rpc.test.ts` 缺凭据跳过）、TUI 189 例全通过；离线 faux 下 print 与 RPC（JSONL 子进程）E2E 通过，含 HTML 导出。真实模型验证未完成（无凭据）。另发现运行时回流：带扩展时 `virtual-modules.ts` → SDK barrel → `modes/index.ts` → `interactive-mode.ts` 仍被拉入。详见 `/Users/waya/.hermes/handoffs/mio-stage1-delivery-20261021.md`。
+5. **总验收（`t_b8b8beb8`，已完成）**：文档路线验收通过；阶段 1 实现与兼容验收通过，内存目标未达标（CLI RSS −1.97 MB，复核重跑 −2.53 MB）。未完成项保持未完成：`S0-4`、`S1-LAZY-2`、`S1-LAZY-3` 的 `marked` 部分、`S1-LAZY-4` 运行时回流、`S1-VERIFY-3` 真实模型验证。详见 `/Users/waya/.hermes/handoffs/mio-final-acceptance-20261021.md`。
 
 ## 已有 Rust Pi：2026-10-21 初查
 

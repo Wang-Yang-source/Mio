@@ -391,6 +391,14 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 	return BUILTIN_THEMES;
 }
 
+/**
+ * True for generated and bundled themes. Only user-authored JSON needs typebox validation, so
+ * `main.ts` loads `theme-schema.ts` on demand instead of at startup.
+ */
+export function isBuiltinThemeName(name: string): boolean {
+	return name === SYSTEM_THEME_NAME || Object.hasOwn(getBuiltinThemes(), name);
+}
+
 export function getAvailableThemes(): string[] {
 	return getAvailableThemesWithPaths().map(({ name }) => name);
 }

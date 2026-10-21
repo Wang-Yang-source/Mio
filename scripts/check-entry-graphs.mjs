@@ -27,6 +27,7 @@ const WORKSPACE = {
 	"@earendil-works/pi-telemetry": "packages/telemetry/src",
 	"@earendil-works/pi-mcp": "packages/mcp/src",
 	"@earendil-works/pi-tui": "packages/tui/src",
+	"@earendil-works/pi-coding-agent": "packages/coding-agent/src",
 };
 
 /**
@@ -76,6 +77,83 @@ const BUDGETS = {
 	},
 };
 
+/**
+ * Startup module graph budgets for `packages/coding-agent`.
+ *
+ * After the Stage-1 lazy-loading work, `theme-schema.ts`, `export-html/*` and `interactive-mode.ts`
+ * stay out of every startup graph, and each entry's `maxFiles` is the measured post-Stage-1 count.
+ * Any file or external dependency listed in `forbid` / `forbidExternals` fails the check again if a
+ * later change imports it eagerly.
+ *
+ * Two hotspots remain eager and are listed in `allow` / `allowExternals`:
+ * - `utils/syntax-highlight.ts` (`highlight.js`): `highlightCode()` is a synchronous public API, and
+ *   `createRequire` cannot load a bundled module (esbuild leaves literal `require()` calls alone, so
+ *   the shipped bundle would fail at runtime).
+ * - `marked` / `marked-cjk-friendly`: the `@earendil-works/pi-tui` root barrel re-exports the
+ *   Markdown component, so any consumer of the tui root loads its parser.
+ * Lifting either needs a public-API change, not a lazy-loading tweak.
+ */
+const LAZY_FORBIDDEN_FILES = [
+	"packages/coding-agent/src/modes/interactive/theme/theme-schema.ts",
+	"packages/coding-agent/src/core/export-html/index.ts",
+	"packages/coding-agent/src/core/export-html/tool-renderer.ts",
+	"packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+];
+const LAZY_FORBIDDEN_EXTERNALS = [
+	"cli-highlight",
+	"highlight.js/lib/core.js",
+	"marked",
+	"marked-cjk-friendly",
+	"grok-mermaid",
+	"jiti",
+	"jiti/static",
+	"@silvia-odwyer/photon-node",
+];
+const REMAINING_ALLOWED_FILES = ["packages/coding-agent/src/utils/syntax-highlight.ts"];
+const REMAINING_ALLOWED_EXTERNALS = ["highlight.js/lib/core.js", "marked", "marked-cjk-friendly"];
+
+const CODING_AGENT_ENTRY_BUDGETS = {
+	"packages/coding-agent/src/cli.ts": {
+		maxFiles: 381,
+		forbid: [...LAZY_FORBIDDEN_FILES, "packages/coding-agent/src/utils/syntax-highlight.ts"],
+		forbidExternals: LAZY_FORBIDDEN_EXTERNALS,
+		allow: REMAINING_ALLOWED_FILES,
+		allowExternals: REMAINING_ALLOWED_EXTERNALS,
+	},
+	"packages/coding-agent/src/rpc-entry.ts": {
+		maxFiles: 380,
+		forbid: [...LAZY_FORBIDDEN_FILES, "packages/coding-agent/src/utils/syntax-highlight.ts"],
+		forbidExternals: LAZY_FORBIDDEN_EXTERNALS,
+		allow: REMAINING_ALLOWED_FILES,
+		allowExternals: REMAINING_ALLOWED_EXTERNALS,
+	},
+	"packages/coding-agent/src/modes/print-mode.ts": {
+		maxFiles: 8,
+		forbid: [
+			...LAZY_FORBIDDEN_FILES,
+			"packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"packages/coding-agent/src/utils/syntax-highlight.ts",
+		],
+		forbidExternals: [...LAZY_FORBIDDEN_EXTERNALS, "typebox", "typebox/compile", "typebox/value"],
+	},
+	"packages/coding-agent/src/modes/rpc/rpc-mode.ts": {
+		maxFiles: 60,
+		forbid: [...LAZY_FORBIDDEN_FILES, "packages/coding-agent/src/utils/syntax-highlight.ts"],
+		forbidExternals: [...LAZY_FORBIDDEN_EXTERNALS, "typebox", "typebox/compile", "typebox/value"],
+		allow: REMAINING_ALLOWED_FILES,
+		allowExternals: REMAINING_ALLOWED_EXTERNALS,
+	},
+	"packages/coding-agent/src/core/sdk.ts": {
+		maxFiles: 309,
+		forbid: [...LAZY_FORBIDDEN_FILES, "packages/coding-agent/src/utils/syntax-highlight.ts", "packages/coding-agent/src/modes/index.ts"],
+		forbidExternals: LAZY_FORBIDDEN_EXTERNALS,
+		allow: REMAINING_ALLOWED_FILES,
+		allowExternals: REMAINING_ALLOWED_EXTERNALS,
+	},
+};
+
+const REPORT_STAGE1 = process.argv.includes("--report-stage1");
+
 const SPEC = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)([^;]*?\sfrom\s*)?["']([^"']+)["']/g;
 
 function resolveSpec(spec, fromFile) {
@@ -101,17 +179,25 @@ function resolveSpec(spec, fromFile) {
 
 function walk(entryFile) {
 	const seen = new Set();
+	const externals = new Map();
 	const queue = [entryFile];
 	while (queue.length > 0) {
 		const file = queue.pop();
 		if (seen.has(file) || file.endsWith(".json")) continue;
 		seen.add(file);
+		const relFrom = relative(ROOT, file);
 		for (const match of readFileSync(file, "utf8").matchAll(SPEC)) {
-			const target = resolveSpec(match[2], file);
-			if (target) queue.push(target);
+			const spec = match[2];
+			const target = resolveSpec(spec, file);
+			if (target) {
+				queue.push(target);
+			} else if (!spec.startsWith("node:") && !spec.startsWith(".")) {
+				if (!externals.has(spec)) externals.set(spec, []);
+				externals.get(spec).push(relFrom);
+			}
 		}
 	}
-	return seen;
+	return { files: seen, externals };
 }
 
 /** `./dist/harness/context.js` in the exports map is `src/harness/context.ts` on disk. */
@@ -148,7 +234,8 @@ for (const [pkgDir, budgets] of Object.entries(BUDGETS)) {
 				failures += 1;
 				continue;
 			}
-			const graph = [...walk(source)].map((file) => relative(ROOT, file));
+			const { files } = walk(source);
+			const graph = [...files].map((file) => relative(ROOT, file));
 			if (graph.length > budget.maxFiles) {
 				console.error(
 					`${pkgDir} export "${name}" reaches ${graph.length} files, budget ${budget.maxFiles}\n` +
@@ -163,6 +250,61 @@ for (const [pkgDir, budgets] of Object.entries(BUDGETS)) {
 					failures += 1;
 				}
 			}
+		}
+	}
+}
+
+for (const [entryRel, budget] of Object.entries(CODING_AGENT_ENTRY_BUDGETS)) {
+	const source = resolve(ROOT, entryRel);
+	if (!existsSync(source)) {
+		console.error(`coding-agent entry "${entryRel}" does not exist on disk`);
+		failures += 1;
+		continue;
+	}
+	const { files, externals } = walk(source);
+	const graph = [...files].map((file) => relative(ROOT, file));
+	const allowedFiles = budget.allow ?? [];
+	const allowedExternals = new Set(budget.allowExternals ?? []);
+
+	if (graph.length > budget.maxFiles) {
+		console.error(`${entryRel} reaches ${graph.length} files, budget ${budget.maxFiles}`);
+		failures += 1;
+	}
+
+	const trackedOverBudgetFiles = [];
+	for (const pattern of budget.forbid ?? []) {
+		const rawHits = graph.filter((file) => file.includes(pattern));
+		if (rawHits.length === 0) continue;
+		const unallowedHits = rawHits.filter((file) => !allowedFiles.some((allowed) => file.endsWith(allowed)));
+		if (unallowedHits.length > 0) {
+			console.error(`${entryRel} must not reach ${pattern}:\n${unallowedHits.map((f) => `    ${f}`).join("\n")}`);
+			failures += 1;
+		} else {
+			trackedOverBudgetFiles.push(...rawHits);
+		}
+	}
+
+	const trackedOverBudgetExternals = [];
+	for (const ext of budget.forbidExternals ?? []) {
+		const importers = externals.get(ext);
+		if (!importers || importers.length === 0) continue;
+		if (!allowedExternals.has(ext)) {
+			console.error(
+				`${entryRel} must not eagerly import external "${ext}" (imported by: ${importers.join(", ")})`,
+			);
+			failures += 1;
+		} else {
+			trackedOverBudgetExternals.push(`${ext} <- ${importers.join(", ")}`);
+		}
+	}
+
+	if (REPORT_STAGE1) {
+		console.log(`[stage1-gate] ${entryRel}: files=${graph.length} (budget=${budget.maxFiles})`);
+		if (trackedOverBudgetFiles.length > 0) {
+			console.log(`  allowed hotspot files (${trackedOverBudgetFiles.length}): ${trackedOverBudgetFiles.join(", ")}`);
+		}
+		if (trackedOverBudgetExternals.length > 0) {
+			console.log(`  allowed hotspot externals (${trackedOverBudgetExternals.length}): ${trackedOverBudgetExternals.join(" | ")}`);
 		}
 	}
 }

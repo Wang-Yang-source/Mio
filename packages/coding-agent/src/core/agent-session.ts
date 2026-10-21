@@ -78,8 +78,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
-import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
-import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
+import type { ToolHtmlRenderer } from "./export-html/index.ts";
 import {
 	type AgentActivityOutcome,
 	type BoundaryContextPreview,
@@ -4316,6 +4315,10 @@ export class AgentSession {
 	 * @returns Path to exported file
 	 */
 	async exportToHtml(outputPath?: string, options: { themeName?: string } = {}): Promise<string> {
+		const [{ exportSessionToHtml }, { createToolHtmlRenderer }] = await Promise.all([
+			import("./export-html/index.ts"),
+			import("./export-html/tool-renderer.ts"),
+		]);
 		const themeName = [options.themeName, this.settingsManager.getTheme()].find(
 			(candidate) => candidate !== undefined && getThemeByName(candidate) !== undefined,
 		);
