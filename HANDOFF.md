@@ -45,6 +45,8 @@ Rust 原型只保存调度状态，不保存消息正文，也不调用模型或
 
 ## 接手顺序
 
+用户随后提出“已有这些项目，Mio 是否还有必要做”。当前接手先完成阶段 0：测原版内存、定位热点、核实参考项目与插件兼容差异，交付带原始记录的可行性报告。完整迁移计划保留为后续候选路线；本阶段不直接重写内核，不把 Rust 本身当作节省内存的证据。
+
 1. 拉取交接分支，确认文件和提交；将旧备份放在检查范围之外。
 2. 优先建立原版内存/行为基准；检查下列已有 Rust 项目，确认可借鉴点和兼容缺口。
 3. 审核当前原型。Agent/SDK 会共享和修改活跃消息对象，不能直接 JSON 往返整个上下文。
@@ -57,7 +59,10 @@ Rust 原型只保存调度状态，不保存消息正文，也不调用模型或
 
 | 项目 | 与目标的关系 | 已确认的兼容边界 |
 | --- | --- | --- |
-| [yannelli/pi-rust](https://github.com/yannelli/pi-rust) | 最值得先评估的 Pi 全栈 Rust 移植，包含 Agent、Provider、TUI、会话及扩展运行时 | 使用 QuickJS 与 Node 兼容模块；不能加载原生 npm addon，并有明确的 API 行为差异 |
+| [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi) | 优先参考 Rust N-API 边界、工具实现及加载/分发 | 上层为 TypeScript/Bun，Agent 主循环仍为 TS；不能据此推定原版插件全兼容 |
+| [c4pt0r/pie](https://github.com/c4pt0r/pie) | 参考 Rust 实现、稳定请求历史与模型前缀缓存优化 | 未核实原版 TS/npm 插件加载能力；模型侧 KV 缓存与客户端进程内存分开测量 |
+| [jshachm/pi-rs](https://github.com/jshachm/pi-rs) | 参考 Rust TUI、会话与工具分层 | 当前扩展 loader 读取 extension.json 元数据，未见执行 Pi TS/npm 插件的逻辑；性能数字未实测 |
+| [yannelli/pi-rust](https://github.com/yannelli/pi-rust) | 参考全栈 Rust 移植的内部实现 | 使用 QuickJS 与 Node 兼容模块；不能加载原生 npm addon，并有明确的 API 行为差异 |
 | [Dicklesworthstone/pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | Rust 原生 Agent，有自己的扩展与资源控制实现 | 当前 README 明确不再追求严格替代 TypeScript Pi，不能当作插件完全兼容方案 |
 | [bigfish1913/pi-rust](https://github.com/bigfish1913/pi-rust) | 可参考 Rust SDK 分层及工具实现 | 使用 Rust cdylib/C ABI 插件，明确不加载 Pi TypeScript SDK 或 npm 扩展 |
 
@@ -67,6 +72,10 @@ Rust 原型只保存调度状态，不保存消息正文，也不调用模型或
 
 以上项目仅供 Rust 内部实现参考；保持当前 Pi 工程与真实 Node 插件宿主。测试集合用于复现，不能变成兼容白名单；不得因参考项目的兼容缺口降低本项目要求。
 
+补充证据：[OMP 原生模块](https://github.com/can1357/oh-my-pi/blob/main/docs/native-crates.md)、[N-API 架构](https://github.com/can1357/oh-my-pi/blob/main/docs/natives-architecture.md)、[TS 主循环](https://github.com/can1357/oh-my-pi/blob/main/packages/agent/src/agent-loop.ts)；[pie 的 DS4 说明](https://github.com/c4pt0r/pie/blob/main/docs/ds4.md) 中 DS4 指本地模型服务，并非序列化算法名称；[pi-rs 扩展 loader](https://github.com/jshachm/pi-rs/blob/main/src/extensions/loader.rs) 目前只体现元数据加载。
+
 ## 交付状态
 
-wayamac 的 SSH 连接在多次有限尝试中超时，尚未向 Hermes 投递或启动远程任务。GitHub 交接分支用于后续拉取，不等于 Hermes 已接单。
+Mac 已拉取交接分支至 `/Users/waya/Projects/Mio`。Hermes 默认看板已创建任务 `t_32802225`，先做上述阶段 0，任务正文保存于 Mac 的 `/Users/waya/.hermes/handoffs/mio-rust-20261021.md`。运行状态以 `hermes kanban --board default show t_32802225` 为准。
+
+原公网端口直连超时；`wayamac-ts` 已验证可用。本地 `wayamac` 已改为经 Ylris 公网 SSH 跳板访问其本地 FRP 转发端口，并实测成功登录 Mac。没有修改服务端防火墙或宣称公网端口直连已恢复。
