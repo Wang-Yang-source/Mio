@@ -112,6 +112,8 @@ function createMutableAgentState(initialState?: AgentInitialState): MutableAgent
 
 /** Options for constructing an {@link Agent}. */
 export interface AgentOptions {
+	/** @internal Experimental scheduler; native modules are loaded by the host. */
+	loopDriverFactory?: AgentLoopConfig["loopDriverFactory"];
 	initialState?: AgentInitialState;
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
@@ -187,6 +189,7 @@ type ActiveRun = {
  */
 export class Agent {
 	private _state: MutableAgentState;
+	private readonly loopDriverFactory: AgentLoopConfig["loopDriverFactory"];
 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
 	private readonly steeringQueue: PendingMessageQueue;
 	private readonly followUpQueue: PendingMessageQueue;
@@ -230,6 +233,7 @@ export class Agent {
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
 		const runtimeOptions: Partial<AgentOptions> = options ?? {};
+		this.loopDriverFactory = runtimeOptions.loopDriverFactory;
 		this._state = createMutableAgentState(runtimeOptions.initialState);
 		this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
 		this.transformContext = runtimeOptions.transformContext;
@@ -467,6 +471,7 @@ export class Agent {
 	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		return {
+			loopDriverFactory: this.loopDriverFactory,
 			model: this._state.model,
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
 			sessionId: this.sessionId,

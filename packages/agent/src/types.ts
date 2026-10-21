@@ -15,6 +15,7 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import type { Static, TSchema } from "typebox";
+import type { LoopDriver } from "./loop-driver.ts";
 
 /**
  * Stream function used by the agent loop. `Models.streamSimple` satisfies
@@ -192,6 +193,8 @@ export interface PrepareNextTurnContext extends AgentTurnContext {}
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
+	/** @internal Experimental scheduler; omitted uses the reference TypeScript loop. */
+	loopDriverFactory?: () => LoopDriver;
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.

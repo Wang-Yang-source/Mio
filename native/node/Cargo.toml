@@ -1,0 +1,20 @@
+[package]
+name = "pi-kernel-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+pi-kernel = { path = "../kernel", version = "=0.1.0" }
+napi = { version = "=3.14.2", default-features = false, features = ["napi8"] }
+napi-derive = { version = "=3.6.12", default-features = false, features = ["type-def"] }
+
+[build-dependencies]
+napi-build = "=2.6.0"
