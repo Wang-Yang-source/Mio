@@ -1,5 +1,9 @@
 # Development Rules
 
+## Mio Requirements
+
+Read and follow [AGENT.md](AGENT.md) before working on this project. Seamless compatibility with unmodified Pi plugins is a mandatory acceptance condition for the Rust migration. Existing Rust Pi projects are implementation references only.
+
 ## Conversational Style
 
 - Keep answers short and concise

@@ -4,12 +4,13 @@
 
 在当前 Pi fork 上降低内存、迁移完整 Rust 内核，同时兼容原来的 Pi 插件。
 用户已选定兼容优先、保留 Node；Node-API 同进程连接 Rust，不改写现有插件。
+用户再次明确：已有 Rust 项目仅供参考，本项目必须无缝加载并运行 Pi 插件。插件代码、npm 依赖和配置原样使用，原版支持的原生 addon 也须保留；不得接受插件能力缩水。硬约束见 [AGENT.md](AGENT.md)。
 步骤与验收条件见 [TODO.md](TODO.md)。用户要求本地 Codex 停止开发，由 wayamac 上的 Hermes 接手。
 
 仓库：<https://github.com/Wang-Yang-source/Mio>
 
 交接分支：`codex/rust-kernel-handoff`。这是未完成的原型交接，不是可用的 Rust 后端。
-先读根目录 `AGENTS.md`、`README.md` 和本文件；遵守项目检查及版本管理要求，不自动提交或发布后续功能。
+先读根目录 `AGENTS.md`、`AGENT.md`、`README.md` 和本文件；遵守项目检查及版本管理要求，不自动提交或发布后续功能。
 
 ## 当前文件与实际行为
 
@@ -64,8 +65,8 @@ Rust 原型只保存调度状态，不保存消息正文，也不调用模型或
 
 `Dicklesworthstone/pi_agent_rust` 的 [README](https://github.com/Dicklesworthstone/pi_agent_rust/blob/main/README.md) 已改变产品方向；[LICENSE](https://github.com/Dicklesworthstone/pi_agent_rust/blob/main/LICENSE) 带额外限制，不应按普通 MIT 项目直接移植。
 
-建议先用冻结的插件集合评估 `yannelli/pi-rust`。在没有行为和内存实测前，不宣称它能满足完整插件兼容，也不直接替换已选的 Node + Rust 架构。
+以上项目仅供 Rust 内部实现参考；保持当前 Pi 工程与真实 Node 插件宿主。测试集合用于复现，不能变成兼容白名单；不得因参考项目的兼容缺口降低本项目要求。
 
 ## 交付状态
 
-wayamac 的 SSH 连接在两次有限尝试中超时，尚未向 Hermes 投递或启动远程任务。GitHub 交接分支用于后续拉取，不等于 Hermes 已接单。
+wayamac 的 SSH 连接在多次有限尝试中超时，尚未向 Hermes 投递或启动远程任务。GitHub 交接分支用于后续拉取，不等于 Hermes 已接单。
